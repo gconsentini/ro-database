@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { buildServer } from "../src/server.js";
 import { closePool } from "../src/db.js";
 
-const app = buildServer();
+const app = await buildServer();
 
 after(async () => {
   await app.close();

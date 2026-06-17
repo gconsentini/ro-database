@@ -5,8 +5,9 @@ import { itemRoutes } from "./routes/items.js";
 import { monsterRoutes } from "./routes/monsters.js";
 import { mapRoutes } from "./routes/maps.js";
 import { skillRoutes } from "./routes/skills.js";
+import { registerGraphQL } from "./graphql.js";
 
-export function buildServer() {
+export async function buildServer() {
   const app = Fastify({ logger: true });
 
   // Health / metadados da API
@@ -29,6 +30,7 @@ export function buildServer() {
       "GET /maps/:id   (inclui o que spawna no mapa)",
       "GET /skills?search=&locale=",
       "GET /skills/:id",
+      "POST /graphql   (API GraphQL; explore em /graphiql)",
     ],
   }));
 
@@ -36,6 +38,7 @@ export function buildServer() {
   app.register(monsterRoutes);
   app.register(mapRoutes);
   app.register(skillRoutes);
+  await registerGraphQL(app);
 
   return app;
 }
