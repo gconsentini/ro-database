@@ -17,21 +17,39 @@ Para popular o banco com a base completa do jogo, a fonte mais pratica e o
 
 > `re` = renewal. Use `pre-re` se o servidor-alvo for pre-renewal.
 
-## Estrategia de importacao
+## Importador pronto (`scripts/import-rathena.ts`)
 
-1. **Clonar a fonte** (apenas a pasta `db/`):
-   ```bash
-   git clone --depth 1 https://github.com/rathena/rathena vendor/rathena
-   ```
-2. **Escrever um parser** em `scripts/import-rathena.ts` que:
-   - le os YAML com um parser (ex: `yaml`),
-   - mapeia campos -> colunas das tabelas `item`, `monster`, `skill`,
-   - insere drops/spawns nas tabelas de relacao,
-   - usa `INSERT ... ON CONFLICT DO UPDATE` para ser idempotente.
-3. **Localizacao (pt-BR / es):** os nomes de exibicao vivem nos arquivos de
-   tradução do cliente (iRO/bRO/LATAM). Mapeie `item_id -> nome` por locale e
-   popule `item_i18n`, `monster_i18n`, `map_i18n`. Onde faltar tradução, a API
-   ja cai no `aegis_name` automaticamente.
+O parser ja esta implementado. Ele:
+
+- segue `item_db.yml -> Footer.Imports` para ler `item_db_usable/equip/etc.yml`;
+- le `mob_db.yml` (monstros + `Drops`/`MvpDrops`, resolvendo o item por
+  `AegisName`; detecta MVP por `Modes.Mvp`/`MvpExp`/`MvpDrops` e boss por
+  `Class: Boss`);
+- le `skill_db.yml` (`Name` = aegis, `Description` = nome de exibicao);
+- varre `npc/<re|pre-re>/mobs/**/*.txt` e agrega spawns por monstro+mapa;
+- grava com `INSERT ... ON CONFLICT DO UPDATE` (idempotente, em lote).
+
+```bash
+# 1. clonar a fonte (db/ e npc/ sao suficientes)
+git clone --depth 1 https://github.com/rathena/rathena vendor/rathena
+
+# 2. (opcional) validar o parsing sem tocar no banco
+DRYRUN=1 RATHENA_DIR=vendor/rathena npm run import:rathena
+
+# 3. importar de fato (apos npm run migrate)
+RATHENA_DIR=vendor/rathena npm run import:rathena
+```
+
+Variaveis: `RATHENA_DIR` (raiz do rAthena) e `RATHENA_MODE=re|pre-re`
+(padrao `re`).
+
+### Localizacao (en / pt-BR / es)
+
+Os nomes em **ingles** (`Name`/`Description` do rAthena) ja sao gravados em
+`*_i18n` no locale `en` pelo importador. As traduções **pt-BR / es** vivem nos
+arquivos do cliente (iRO/bRO/LATAM): mapeie `id -> nome` por locale e popule
+`item_i18n`, `monster_i18n`, `map_i18n`. Onde faltar tradução, a API cai no `en`
+e, na ausencia dele, no `aegis_name`.
 
 ## Conversao de taxas de drop
 
