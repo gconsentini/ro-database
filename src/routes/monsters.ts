@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { one, query } from "../db.js";
 import { resolveLocale } from "../config.js";
+import { fuzzyClause } from "../search.js";
 
 export async function monsterRoutes(app: FastifyInstance) {
   // GET /monsters?search=&race=&element=&mvp=&locale=
@@ -11,6 +12,28 @@ export async function monsterRoutes(app: FastifyInstance) {
     const offset = Math.max(Number(q.offset ?? 0), 0);
     const mvp = q.mvp === undefined ? null : q.mvp === "true";
 
+    const params: unknown[] = [locale, q.race ?? null, q.element ?? null, mvp];
+    const conds = [
+      "($2::text IS NULL OR m.race = $2)",
+      "($3::text IS NULL OR m.element = $3)",
+      "($4::boolean IS NULL OR m.is_mvp = $4)",
+    ];
+    let orderBy = "m.id";
+
+    if (q.search) {
+      const f = fuzzyClause(
+        ["lower(m.aegis_name)", "lower(COALESCE(t.name, ''))"],
+        q.search,
+        params.length + 1,
+      );
+      params.push(f.value);
+      conds.push(f.where);
+      orderBy = `${f.rank} DESC, m.id`;
+    }
+    params.push(limit, offset);
+    const lim = `$${params.length - 1}`;
+    const off = `$${params.length}`;
+
     const rows = await query(
       `
       SELECT m.id, m.aegis_name, m.level, m.hp, m.base_exp, m.job_exp,
@@ -18,16 +41,11 @@ export async function monsterRoutes(app: FastifyInstance) {
              COALESCE(t.name, m.aegis_name) AS name
       FROM monster m
       LEFT JOIN monster_i18n t ON t.monster_id = m.id AND t.locale = $1
-      WHERE ($2::text IS NULL OR m.race = $2)
-        AND ($3::text IS NULL OR m.element = $3)
-        AND ($4::boolean IS NULL OR m.is_mvp = $4)
-        AND ($5::text IS NULL OR
-             lower(m.aegis_name) LIKE '%' || lower($5) || '%' OR
-             lower(COALESCE(t.name, '')) LIKE '%' || lower($5) || '%')
-      ORDER BY m.id
-      LIMIT $6 OFFSET $7
+      WHERE ${conds.join(" AND ")}
+      ORDER BY ${orderBy}
+      LIMIT ${lim} OFFSET ${off}
       `,
-      [locale, q.race ?? null, q.element ?? null, mvp, q.search ?? null, limit, offset],
+      params,
     );
     return { locale, count: rows.length, monsters: rows };
   });

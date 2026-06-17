@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { one, query } from "../db.js";
 import { resolveLocale } from "../config.js";
+import { fuzzyClause } from "../search.js";
 
 export async function mapRoutes(app: FastifyInstance) {
   // GET /maps?search=&type=&locale=
@@ -8,18 +9,30 @@ export async function mapRoutes(app: FastifyInstance) {
     const q = req.query as Record<string, string | undefined>;
     const locale = resolveLocale(q.locale);
 
+    const params: unknown[] = [locale, q.type ?? null];
+    const conds = ["($2::text IS NULL OR m.type = $2)"];
+    let orderBy = "m.id";
+
+    if (q.search) {
+      const f = fuzzyClause(
+        ["lower(m.id)", "lower(COALESCE(t.name, ''))"],
+        q.search,
+        params.length + 1,
+      );
+      params.push(f.value);
+      conds.push(f.where);
+      orderBy = `${f.rank} DESC, m.id`;
+    }
+
     const rows = await query(
       `
       SELECT m.id, m.type, COALESCE(t.name, m.id) AS name
       FROM map m
       LEFT JOIN map_i18n t ON t.map_id = m.id AND t.locale = $1
-      WHERE ($2::text IS NULL OR m.type = $2)
-        AND ($3::text IS NULL OR
-             lower(m.id) LIKE '%' || lower($3) || '%' OR
-             lower(COALESCE(t.name, '')) LIKE '%' || lower($3) || '%')
-      ORDER BY m.id
+      WHERE ${conds.join(" AND ")}
+      ORDER BY ${orderBy}
       `,
-      [locale, q.type ?? null, q.search ?? null],
+      params,
     );
     return { locale, count: rows.length, maps: rows };
   });

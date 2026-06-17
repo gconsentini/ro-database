@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { one, query } from "../db.js";
 import { resolveLocale } from "../config.js";
+import { fuzzyClause } from "../search.js";
 
 export async function itemRoutes(app: FastifyInstance) {
   // GET /items?search=&type=&locale=&limit=&offset=
@@ -10,6 +11,24 @@ export async function itemRoutes(app: FastifyInstance) {
     const limit = Math.min(Number(q.limit ?? 50), 200);
     const offset = Math.max(Number(q.offset ?? 0), 0);
 
+    const params: unknown[] = [locale, q.type ?? null];
+    const conds = ["($2::text IS NULL OR i.type = $2)"];
+    let orderBy = "i.id";
+
+    if (q.search) {
+      const f = fuzzyClause(
+        ["lower(i.aegis_name)", "lower(COALESCE(t.name, ''))"],
+        q.search,
+        params.length + 1,
+      );
+      params.push(f.value);
+      conds.push(f.where);
+      orderBy = `${f.rank} DESC, i.id`;
+    }
+    params.push(limit, offset);
+    const lim = `$${params.length - 1}`;
+    const off = `$${params.length}`;
+
     const rows = await query(
       `
       SELECT i.id, i.aegis_name, i.type, i.subtype, i.slots, i.weight,
@@ -18,14 +37,11 @@ export async function itemRoutes(app: FastifyInstance) {
              t.description
       FROM item i
       LEFT JOIN item_i18n t ON t.item_id = i.id AND t.locale = $1
-      WHERE ($2::text IS NULL OR i.type = $2)
-        AND ($3::text IS NULL OR
-             lower(i.aegis_name) LIKE '%' || lower($3) || '%' OR
-             lower(COALESCE(t.name, '')) LIKE '%' || lower($3) || '%')
-      ORDER BY i.id
-      LIMIT $4 OFFSET $5
+      WHERE ${conds.join(" AND ")}
+      ORDER BY ${orderBy}
+      LIMIT ${lim} OFFSET ${off}
       `,
-      [locale, q.type ?? null, q.search ?? null, limit, offset],
+      params,
     );
     return { locale, count: rows.length, items: rows };
   });
